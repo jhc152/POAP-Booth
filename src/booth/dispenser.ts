@@ -8,7 +8,8 @@ import { PlayCloseSound } from './sounds'
 import { signedFetch } from '@decentraland/SignedFetch'
 
 export const sceneMessageBus = new MessageBus()
-const timeDelay = 5 * 60 * 1000 // Delay before being able to claim a POAP in milliseconds
+const minutesWait = 1 //Delay before being able to claim a POAP in minutes
+const timeDelay = minutesWait * 60 * 1000 
 
 /**
  *
@@ -17,46 +18,39 @@ const timeDelay = 5 * 60 * 1000 // Delay before being able to claim a POAP in mi
  * @param {string} eventUUID ID of the event
  *
  */
-export function createDispenser(
-  transform: TranformConstructorArgs,
-  eventUUID: string,
-  poapServer?: string
-) {
+export function createDispenser(transform: TranformConstructorArgs, eventUUID: string, poapServer?: string) {
   const createdTime = new Date()
-  const serverURL: string = poapServer
-    ? poapServer
-    : 'poap-api.decentraland.org'
+  const serverURL: string = poapServer ? poapServer : 'poap-api.decentraland.org'
 
   let alreadyAttempted: boolean = false
+
+  let buttonEnabled: boolean = true
 
   const entity = new Entity()
   engine.addEntity(entity)
   eventUUID = eventUUID
 
-  entity.addComponent(new GLTFShape('models/poap/POAP_dispenser.glb'))
+  entity.addComponent(new GLTFShape('models/poap/poapv2/POAP_dispenser.glb'))
   entity.addComponent(new Transform(transform))
 
   const idleAnim = new AnimationState('Idle_POAP', { looping: true })
   entity.addComponent(new Animator())
   entity.getComponent(Animator).addClip(idleAnim)
-  entity
-    .getComponent(Animator)
-    .addClip(new AnimationState('Action_POAP', { looping: false }))
+
+  const actionAnim = new AnimationState('Action_POAP', { looping: false })
+  entity.getComponent(Animator).addClip(actionAnim)
   idleAnim.play()
 
   const button = new Entity()
   button.addComponent(new GLTFShape('models/poap/POAP_button.glb'))
   button.addComponent(new Animator())
-  button
-    .getComponent(Animator)
-    .addClip(new AnimationState('Button_Action', { looping: false }))
+  button.getComponent(Animator).addClip(new AnimationState('Button_Action', { looping: false }))
   button.setParent(entity)
   button.addComponent(
     new OnPointerDown(
       (_e) => {
         button.getComponent(Animator).getClip('Button_Action').play()
-        //sceneMessageBus.emit('activatePoap', {})
-        void makeTransaction()
+        sceneMessageBus.emit('activatePoap', {})        
       },
       { hoverText: 'Get Attendance Token' }
     )
@@ -68,18 +62,22 @@ export function createDispenser(
   })
 
   function activate(): void {
-    const anim = entity.getComponent(Animator)
+    
+    if(buttonEnabled){
+      buttonEnabled = false
+      const anim = entity.getComponent(Animator)
+      actionAnim.play()      
 
-    anim.getClip('Action_POAP').play()
-
-    entity.addComponentOrReplace(
-      new utils.Delay(4000, () => {
-        anim.getClip('Action_POAP').stop()
-
-        anim.getClip('Idle_POAP').play()
-      })
-    )
+      entity.addComponentOrReplace(    
+        new utils.Delay(1800, () => {          
+          void makeTransaction() 
+        })
+      )
+    }
   }
+
+
+  
 
   async function getCaptcha(): Promise<string> {
     const captchaUUIDQuery = await signedFetch(`https://${serverURL}/captcha`, {
@@ -89,31 +87,64 @@ export function createDispenser(
     return json.data.uuid
   }
 
+
+  function resetButtonEnabled (): void {
+    buttonEnabled = true      
+  }
+
+
+  function retunrAnimationLoop():void{
+    entity.addComponent(  
+      new utils.Delay(3000, () => {  
+         actionAnim.stop()    
+          idleAnim.play()
+      })
+    )
+  }
+
+
   async function makeTransaction() {
+
+    
+
     const userData = await getUserData()
 
-    // no wallet
-    if (!userData || !userData.hasConnectedWeb3) {
-      log('no wallet')
-      PlayCloseSound()
-
-      boothUI.metamask()
-      return
-    }
-
+   
     // 5 minutes timer before claiming
     if (+createdTime > +new Date() - timeDelay) {
       PlayCloseSound()
       boothUI.timerBeforeClaim(createdTime, timeDelay)
+      buttonEnabled = true
+      resetButtonEnabled()
+      retunrAnimationLoop() 
       return
     }
+
+
+    // no wallet
+     if (!userData || !userData.hasConnectedWeb3) {
+      log('no wallet')
+      PlayCloseSound()
+
+      boothUI.metamask()
+      //buttonEnabled = true
+      resetButtonEnabled()
+      retunrAnimationLoop() 
+      return
+    }
+
 
     if (alreadyAttempted) {
       // already attempted
       PlayCloseSound()
       boothUI.alreadyClaimed()
+      //buttonEnabled = true
+      resetButtonEnabled()
+      retunrAnimationLoop() 
       return
     }
+
+    
 
     alreadyAttempted = true
     const realm = await getCurrentRealm()
@@ -130,13 +161,8 @@ export function createDispenser(
       log(response.status)
       const json = await response.json()
       log(json)
-      if (response.status === 200) {
-        boothUI.viewSuccessMessage(
-          json.data.event.name,
-          json.data.event.image_url,
-          1024,
-          1024
-        )
+      if (response.status === 20000) {
+        boothUI.viewSuccessMessage(json.data.event.name, json.data.event.image_url, 1024, 1024)
 
         sceneMessageBus.emit('activatePoap', {})
       } else {
@@ -144,15 +170,11 @@ export function createDispenser(
         switch (json.error) {
           case 'Address already claimed a code for this event':
             UI.displayAnnouncement(`You already claimed this event`, 3)
-
             break
 
-          default:
+        default:
             alreadyAttempted = false
-            UI.displayAnnouncement(
-              `Oops, there was an error: "${json.error}"`,
-              3
-            )
+            UI.displayAnnouncement(`Oops, there was an error: "${json.error}"`, 3)
             break
         }
       }
@@ -160,15 +182,12 @@ export function createDispenser(
       alreadyAttempted = false
       log('Error fetching from POAP server ', serverURL)
     }
-
+    retunrAnimationLoop() 
+    resetButtonEnabled()
     return
   }
 
-  async function claimCall(
-    captchaResult: string,
-    userData: UserData,
-    realm: Realm
-  ) {
+  async function claimCall(captchaResult: string, userData: UserData, realm: Realm) {
     const response = await fetch(`https://${serverURL}/claim/${eventUUID}`, {
       headers: { 'Content-Type': 'application/json' },
       method: 'POST',

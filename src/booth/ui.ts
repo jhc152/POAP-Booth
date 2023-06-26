@@ -2,12 +2,17 @@ import * as utils from '@dcl/ecs-scene-utils'
 import * as UI from '@dcl/ui-scene-utils'
 import { PlayCloseSound, PlayCoinSound } from './sounds'
 
+
+
+
 export function timerBeforeClaim(createdTime: Date, delay: number) {
   const mmPrompt = new UI.CustomPrompt(undefined, 450, 200)
   const timeRemaining = (+new Date() + delay - +createdTime) / 1000
-  log(timeRemaining)
-  const minutes = Math.floor(timeRemaining / 60)
-  const seconds = Math.floor(timeRemaining - minutes * 60)
+
+  const realTimeRestante = ( delay / 1000 ) - (timeRemaining -( delay / 1000 ))
+  const minutes = Math.floor(realTimeRestante / 60)
+  const seconds = Math.floor(realTimeRestante - minutes * 60)
+
   mmPrompt.addText(
     `You need to wait \n${
       minutes ? `${minutes} minutes${seconds > 0 ? ' and ' : ''}` : ''
@@ -17,10 +22,15 @@ export function timerBeforeClaim(createdTime: Date, delay: number) {
     Color4.Black(),
     20
   )
+
+  
 }
 
 /* UI asking to install metamask */
 export function metamask() {
+
+
+
   const mmPrompt = new UI.CustomPrompt()
 
   mmPrompt.addText(
